@@ -12,12 +12,17 @@ const UNCLASSIFIED_RANK: usize = NSET;
 /* Min-max number of students per set */
 const NSPS_MIN: usize = 3;
 const NSPS_MAX: usize = 5;
+/* Target number of students per set */
 const NSPS_TARGET: usize = 4;
 
+/* Return the score (penalty) for a given choice rank.
+   The lower the rank, the lower the score. */
 fn score_for_rank(irank: usize) -> i64 {
     return (irank * irank) as i64;
 }
 
+/* Return the score (penalty) for a given set size,
+   given the number of junior and senior students. */
 fn score_for_setsize(njs: usize, nss: usize) -> i64 {
     if njs == 0 || nss == 0 {
         /* Forbid either no junior or senior student in set */
@@ -47,25 +52,32 @@ fn score_for_setsize(njs: usize, nss: usize) -> i64 {
 struct Student {
     name: String,
     senior: bool,
+    /* Choices of sets, indices of set, by rank */
     choices: [usize; NCHOICE],
+    /* Rank in choices for each set.
+       UNCLASSIFIED_RANK for set not in choices. */
     ranks: [usize; NSET],
 }
 
-#[derive(Debug)]
 struct Classroom {
     students: Vec<Student>,
 }
 
 #[derive(Eq, PartialEq, Ord, PartialOrd)]
 struct SetSelection {
+    /* Score for this selection, used for ordering */
     score: i64,
+    /* Number of sets selected in this selection */
     nsets: usize,
+    /* Bit-set of selected sets */
     selected: [bool; NSET],
 }
 
 #[derive(Debug)]
 struct Allocation {
+    /* Score of this allocation */
     score: i64,
+    /* Index to allocated set for each student */
     alloc: [usize; NSTUDENT],
 }
 
@@ -79,28 +91,22 @@ impl Student {
         }
         Student { name: name.to_string(), senior: senior, choices: choices, ranks: ranks }
     }
-    fn rank(&self, iset: usize) -> usize {
-        self.ranks[iset]
-    }
-    fn senior(&self) -> bool {
-        self.senior
-    }
     /* Find the best set according to the set selection */
     fn best_set(&self, set_selection: &SetSelection) -> usize {
         /* Select the first set in the student choice */
         for irank in 0..NCHOICE {
             let iset = self.choices[irank];
-            if set_selection.is_selectable(iset) {
+            if set_selection.selected[iset] {
                 return iset;
             }
         }
-        /* Pick first set selectable */
+        /* Otherwise pick first set selectable */
         for iset in 0..NSET {
-            if set_selection.is_selectable(iset) {
+            if set_selection.selected[iset] {
                 return iset;
             }
         }
-        panic!("Shoud not be here")
+        panic!("Should not be here")
     }
 }
 
@@ -120,45 +126,48 @@ impl Classroom {
     fn new(students: Vec<Student>) -> Classroom {
         Classroom { students: students }
     }
-    fn students(&self) -> &Vec<Student> {
-        &self.students
-    }
-    fn student(&self, istd: usize) -> &Student {
-        &self.students.get(istd).unwrap()
-    }
     fn rand_choices(rng: &mut StdRng) -> [usize; NCHOICE] {
-        // const SET_COEF: [u32; NSET] = [ 100, 80, 60, 40, 40, 30, 20, 10 ];
-        // const SET_COEFS: [u32; NSET] = [ 100, 80, 80, 60, 50, 40, 40, 30, 20, 10, 10, 10 ];
-        const SET_COEFS: [u32; NSET] = [ 100, 90, 80, 80, 60, 60, 50, 40, 40, 30, 20, 10, 10, 10, 5, 5 ];
+        // Random weighting for each set
+        const SET_COEFS: [u32; NSET] = [ 100, 100, 80, 80, 80, 80, 60, 60, 60, 40, 40, 40, 40, 30, 30, 30 ];
+        // const SET_COEFS: [u32; NSET] = [ 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10 ];
         let mut ret = [0; NCHOICE];
         let mut set_indexes = [0; NSET];
-        for is in 0..set_indexes.len() {
-            set_indexes[is] = is;
+        for iset in 0..set_indexes.len() {
+            set_indexes[iset] = iset;
         }
         let mut picked_sets = [false; NSET];
         assert!(NCHOICE <= NSET); // Otherwise will loop forever
-        for ic in 0..NCHOICE {
+        for irank in 0..NCHOICE {
             loop {
-                let is = *set_indexes.choose_weighted(rng, |is| SET_COEFS[*is]).unwrap();
-                if !picked_sets[is] {
-                    ret[ic] = is;
-                    picked_sets[is] = true;
+                let iset = *set_indexes.choose_weighted(rng, |is| SET_COEFS[*is]).unwrap();
+                if !picked_sets[iset] {
+                    ret[irank] = iset;
+                    picked_sets[iset] = true;
                     break;
                 }
             }
         }
         ret
     }
-    /* Generate a random classroom */
+    /* Generate a random classroom, composed of 1/3 junior, 2/3 senior. */
     fn rand(rng: &mut StdRng) -> Classroom {
-        let mut students = Vec::<Student>::new();
-        for ie in 0..NSTUDENT {
+        let mut students = Vec::new();
+        for istd in 0..NSTUDENT {
             students.push(Student::new(
-                &format!("E{:02}", ie),
-                ie > NSTUDENT / 3,
+                &format!("E{:02}", istd),
+                istd > NSTUDENT / 3,
                 Classroom::rand_choices(rng)));
         }
         Classroom { students: students }
+    }
+}
+
+impl fmt::Debug for Classroom {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (istd, student) in self.students.iter().enumerate() {
+            writeln!(f, "  {:2} - {:?}", istd, student)?;
+        }
+        write!(f, "")
     }
 }
 
@@ -211,8 +220,8 @@ impl SetSelection {
         for iset in 0..NSET {
             /* The score of a set is the NSPS_MAX best ranks scores */
             let mut best_ranks = Vec::new();
-            for student in class.students() {
-                best_ranks.push(student.rank(iset));
+            for student in &class.students {
+                best_ranks.push(student.ranks[iset]);
             }
             best_ranks.sort();
             best_ranks.truncate(NSPS_MAX);
@@ -221,9 +230,6 @@ impl SetSelection {
             }
         }
         ret
-    }
-    fn is_selectable(&self, iset: usize) -> bool {
-        self.selected[iset]
     }
 }
 
@@ -247,32 +253,36 @@ impl Allocation {
     fn new(classroom: &Classroom, set_selection: &SetSelection) -> Allocation {
         let mut alloc = [999; NSTUDENT];
         for istd in 0..NSTUDENT {
-            alloc[istd] = classroom.student(istd).best_set(set_selection);
+            alloc[istd] = classroom.students[istd].best_set(set_selection);
         }
         Allocation { score: Self::score(alloc, classroom, set_selection), alloc: alloc }
     }
+    /* Compute the score of this allocation */
     fn score(alloc: [usize; NSTUDENT], classroom: &Classroom, set_selection: &SetSelection) -> i64 {
         let mut nssps = [0; NSET];
         let mut njsps = [0; NSET];
         let mut rank_score = 0;
         for istd in 0..NSTUDENT {
-            let student = classroom.student(istd);
+            let student = &classroom.students[istd];
             let iset = alloc[istd];
-            if student.senior() {
+            if student.senior {
                 nssps[iset] += 1;
             } else {
                 njsps[iset] += 1;
             }
-            rank_score += score_for_rank(student.rank(iset));
+            rank_score += score_for_rank(student.ranks[iset]);
         }
         let mut set_score = 0;
         for iset in 0..NSET {
-            if set_selection.is_selectable(iset) {
+            if set_selection.selected[iset] {
                 set_score += score_for_setsize(njsps[iset], nssps[iset]);
             }
         }
         rank_score + set_score
     }
+    /* Move one student of this allocation from one set to another one,
+       but only if the move decrease the score.
+       Return true if the allocation has been modified. */
     fn move_one(&mut self, classroom: &Classroom, set_selection: &SetSelection, rng: &mut StdRng, verbose: bool) -> bool {
         let mut alloc2 = [0; NSTUDENT];
         alloc2.clone_from_slice(&self.alloc);
@@ -281,27 +291,31 @@ impl Allocation {
         let mut new_iset;
         loop {
             new_iset = rng.gen_range(0, NSET);
-            if new_iset != old_iset && set_selection.is_selectable(new_iset) {
+            if new_iset != old_iset && set_selection.selected[new_iset] {
                 break;
             }
         }
         alloc2[istd] = new_iset;
         let new_score = Self::score(alloc2, classroom, set_selection);
         if new_score >= self.score {
+            // Not better
             false
         } else {
-            let student = classroom.student(istd);
+            // Better
+            let student = &classroom.students[istd];
             if verbose {
                 println!("MOVED student {} from set {} (rank {}) to {} (rank {}), score {} > {}",
-                    istd, old_iset, student.rank(old_iset), new_iset, student.rank(new_iset), 
+                    istd, old_iset, student.ranks[old_iset], new_iset, student.ranks[new_iset], 
                     self.score, new_score);
             }
-            // self.debug(&classroom, &set_selection);
             self.alloc.clone_from_slice(&alloc2);
             self.score = new_score;
             true
         }
     }
+    /* Swap two students sets of this allocation,
+       but only if the swap decrease the score.
+       Return true if the allocation has been modified. */
     fn swap_two(&mut self, classroom: &Classroom, set_selection: &SetSelection, rng: &mut StdRng, verbose: bool) -> bool {
         let mut alloc2 = [0; NSTUDENT];
         alloc2.clone_from_slice(&self.alloc);
@@ -313,15 +327,17 @@ impl Allocation {
         alloc2[istd2] = old_iset1;
         let new_score = Self::score(alloc2, classroom, set_selection);
         if new_score >= self.score {
+            // Not better
             false
         } else {
+            // Better
             if verbose {
-                let student1 = classroom.student(istd1);
-                let student2 = classroom.student(istd2);
+                let student1 = &classroom.students[istd1];
+                let student2 = &classroom.students[istd2];
                 println!("SWAPPED student {} from set {} (rank {}) to set {} (rank {})",
-                    istd1, old_iset1, student1.rank(old_iset1), alloc2[istd1], student1.rank(alloc2[istd1]));
+                    istd1, old_iset1, student1.ranks[old_iset1], alloc2[istd1], student1.ranks[alloc2[istd1]]);
                 println!("   with student {} from set {} (rank {}) to set {} (rank {}), score {} > {}",
-                    istd2, old_iset2, student2.rank(old_iset2), alloc2[istd2], student2.rank(alloc2[istd2]),
+                    istd2, old_iset2, student2.ranks[old_iset2], alloc2[istd2], student2.ranks[alloc2[istd2]],
                     self.score, new_score);
             }
             self.alloc.clone_from_slice(&alloc2);
@@ -335,14 +351,14 @@ impl Allocation {
         let mut nssps = [0; NSET];
         let mut njsps = [0; NSET];
         for istd in 0..NSTUDENT {
-            let student = classroom.student(istd);
+            let student = &classroom.students[istd];
             let iset = self.alloc[istd];
-            if student.senior() {
+            if student.senior {
                 nssps[iset] += 1;
             } else {
                 njsps[iset] += 1;
             }
-            let rank = student.rank(iset);
+            let rank = student.ranks[iset];
             println!("  {:?} - Set {:2} (choice {:2}, score {:4})",
                 student, iset, rank + 1, score_for_rank(rank));
         }
@@ -359,8 +375,12 @@ impl Allocation {
     }
 }
 
+/* Search for the best allocation of a given set selection,
+   using depth as the search limit.
+   Return the best allocation found, if any. */
 fn find_best_alloc(classroom: &Classroom, set_selection: &SetSelection, rng: &mut StdRng, depth: usize) -> Option<Allocation> {
     let mut best_alloc: Option<Allocation> = None;
+    /* Loop depth time, using a new base allocation as a starting point. */
     for _i in 0..depth {
         let mut alloc = Allocation::new(&classroom, &set_selection);
         let mut stuck_counter = 0;
@@ -369,6 +389,7 @@ fn find_best_alloc(classroom: &Classroom, set_selection: &SetSelection, rng: &mu
             if alloc.move_one(classroom, set_selection, rng, false) { modified = true }
             if alloc.swap_two(classroom, set_selection, rng, false) { modified = true }
             if !modified { stuck_counter += 1 } else { stuck_counter = 0 }
+            /* After a while w/o any improvement, give up. */
             if stuck_counter > depth * 10 { break }
         }
         if best_alloc.is_none() || alloc.score < best_alloc.as_ref().unwrap().score {
@@ -381,8 +402,9 @@ fn find_best_alloc(classroom: &Classroom, set_selection: &SetSelection, rng: &mu
 }
 
 fn main() {
-    /* Deterministic random generator for Monte-Carlo optimization */
-    let mut rng: StdRng = SeedableRng::from_seed([23, 8, 75, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    /* Deterministic random generator for Monte-Carlo */
+    let mut seed = [0; 32]; seed[0] = 42;
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
     /* Create a classroom */
     /* let classroom1 = Classroom::new(vec![
         Student::new("E1", false, [ 1, 2, 3 ]),
@@ -393,10 +415,7 @@ fn main() {
     ]);*/
     let classroom2 = Classroom::rand(&mut rng);
     let classroom = classroom2;
-    println!("Our classroom is:");
-    for (istd, student) in classroom.students().iter().enumerate() {
-        println!("  {:2} - {:?}", istd, student);
-    }
+    println!("Our classroom is:\n{:?}", &classroom);
 
     /* Generate all set selections */
     let nsets_min = NSTUDENT / NSPS_MAX;
