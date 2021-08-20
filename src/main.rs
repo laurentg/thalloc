@@ -2,11 +2,12 @@ use rand::prelude::*;
 use std::fmt;
 
 /* Number of students to assign */
-const NSTUDENT: usize = 30;
+// const NSTUDENT: usize = 25;
+const NSTUDENT: usize = 27;
 /* Number of sets to assign to */
-const NSET: usize = 16;
+const NSET: usize = 13;
 /* Number of choices of set per student */
-const NCHOICE: usize = 6;
+const NCHOICE: usize = 5;
 /* Default rank for unclassified sets */
 const UNCLASSIFIED_RANK: usize = NSET;
 /* Min-max number of students per set */
@@ -14,6 +15,20 @@ const NSPS_MIN: usize = 3;
 const NSPS_MAX: usize = 5;
 /* Target number of students per set */
 const NSPS_TARGET: usize = 4;
+
+const A: usize = 0;
+const B: usize = 1;
+const C: usize = 2;
+const D: usize = 3;
+const E: usize = 4;
+const F: usize = 5;
+const G: usize = 6;
+const H: usize = 7;
+const I: usize = 8;
+const J: usize = 9;
+const K: usize = 10;
+const L: usize = 11;
+const M: usize = 12;
 
 /* Return the score (penalty) for a given choice rank.
    The lower the rank, the lower the score. */
@@ -112,11 +127,15 @@ impl Student {
 
 impl fmt::Debug for Student {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Student {{ {:12} {} [",
+        write!(f, "Student {{ {:20} {} [",
             self.name,
             if self.senior { "senior" } else { "junior" })?;
         for iset in &self.choices {
-            write!(f, "{:2} ", iset)?;
+            write!(f, "{:1} ", (iset + 'A' as usize) as u8 as char)?;
+        }
+        write!(f, "] ranks=[")?;
+        for irank in &self.ranks {
+            write!(f, "{:2} ", irank)?;
         }
         write!(f, "] }}")
     }
@@ -128,8 +147,9 @@ impl Classroom {
     }
     fn rand_choices(rng: &mut StdRng) -> [usize; NCHOICE] {
         // Random weighting for each set
-        const SET_COEFS: [u32; NSET] = [ 100, 100, 80, 80, 80, 80, 60, 60, 60, 40, 40, 40, 40, 30, 30, 30 ];
-        // const SET_COEFS: [u32; NSET] = [ 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10 ];
+        // const SET_COEFS: [u32; NSET] = [ 100, 30, 30, 30 ];
+        // const SET_COEFS: [u32; NSET] = [ 100, 100, 80, 80, 80, 80, 60, 60, 60, 40, 40, 40, 40, 30, 30, 30 ];
+        const SET_COEFS: [u32; NSET] = [ 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10 ];
         let mut ret = [0; NCHOICE];
         let mut set_indexes = [0; NSET];
         for iset in 0..set_indexes.len() {
@@ -239,7 +259,7 @@ impl fmt::Debug for SetSelection {
         write!(f, "[")?;
         for (iset, sel) in self.selected.iter().enumerate() {
             if *sel {
-                write!(f, "{:2} ", iset)?;
+                write!(f, "{:1} ", (iset + 'A' as usize) as u8 as char)?;
                 n += 1;
             } else {
                 write!(f, "__ ")?;
@@ -350,6 +370,7 @@ impl Allocation {
         println!("{:?}", self);
         let mut nssps = [0; NSET];
         let mut njsps = [0; NSET];
+        let mut nrank = [0; NCHOICE];
         for istd in 0..NSTUDENT {
             let student = &classroom.students[istd];
             let iset = self.alloc[istd];
@@ -360,16 +381,24 @@ impl Allocation {
             }
             let rank = student.ranks[iset];
             println!("  {:?} - Set {:2} (choice {:2}, score {:4})",
-                student, iset, rank + 1, score_for_rank(rank));
+                student, (iset + 'A' as usize) as u8 as char, rank + 1, score_for_rank(rank));
+            if rank < NCHOICE {
+                nrank[rank] += 1;
+            }
         }
         println!("-----------------------------------------------------------");
         for iset in 0..NSET {
             let ntot = njsps[iset] + nssps[iset];
             if ntot > 0 {
                 println!("  Set {:2} - {} students ({} junior, {} senior), score={}",
-                    iset, ntot, njsps[iset], nssps[iset],
+                    (iset + 'A' as usize) as u8 as char, ntot, njsps[iset], nssps[iset],
                     score_for_setsize(njsps[iset], nssps[iset]));
             }
+        }
+        println!("-----------------------------------------------------------");
+        for irank in 0..NCHOICE {
+            println!("Choice {:1} - {:2} students",
+                     irank + 1, nrank[irank]);
         }
         println!("===========================================================");
     }
@@ -403,25 +432,96 @@ fn find_best_alloc(classroom: &Classroom, set_selection: &SetSelection, rng: &mu
 
 fn main() {
     /* Deterministic random generator for Monte-Carlo */
-    let mut seed = [0; 32]; seed[0] = 42;
+    // Best is 1, 50 - but one choice is 4th
+    // Best is 2, 53
+    let mut seed = [0; 32]; seed[0] = 4;
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     /* Create a classroom */
     /* let classroom1 = Classroom::new(vec![
-        Student::new("E1", false, [ 1, 2, 3 ]),
-        Student::new("E2", false, [ 1, 2, 3 ]),
-        Student::new("E3", true, [ 1, 2, 3 ]),
-        Student::new("E4", true, [ 1, 2, 3 ]),
-        Student::new("E5", true, [ 1, 2, 3 ]),
+        Student::new("Duprez Nina", true , [ D, I, L, J, F ]),
+        Student::new("Allaire Naïla", true, [ G, A, K, H, C ]),
+        Student::new("Suaudeau Anaïs", true,  [ B, A, L, K, C ]),
+        Student::new("Rouleau Michka", false, [ I, L, F, J, D ]),
+        Student::new("Rolland Marie", true, [ I, F, D, C, J ]),
+        Student::new("Girard Antoine", false,  [ L, F, D, E, K ]),
+        Student::new("Bethys Jodie", false, [ L, F, E, D, J ]),
+        Student::new("Hacques Malou", true, [ D, E, B, F, K ]),
+        Student::new("Chataigner Sören", false,  [ I, E, A, K, C ]),
+        Student::new("Massons Estelle", false, [ I, G, F, B, L ]),
+        Student::new("Henni Naomy", true, [ L, F, E, J, C ]),
+        Student::new("Ragnaud Fybie", false,  [ E, L, D, A, F ]),
+        Student::new("Foucher Célestin",  true, [ L, B, A, C, E ]),
+        Student::new("Brimaud Florian", false, [ F, J, D, I, L ]),
+        Student::new("Touzot Mattéo", false,  [ B, F, L, G, A ]),
+        Student::new("Das Dores Gwendoline", false, [ F, J, L, E, I ]),
+        Student::new("Brunel Nina", true, [ D, L, H, F, E ]),
+        Student::new("Desfossé Angèle", true,  [ B, D, G, I, L ]),
+        Student::new("Guérin Rudy", true, [ D, I, L, J, F ]),
+        Student::new("Grellaud Camille", true, [ D, H, B, F, C ]),
+        Student::new("Savagnac Kassandra", false,  [ I, J, K, L, F ]),
+        Student::new("Guillou Maëva", true, [ D, A, L, B, F ]),
+        Student::new("Di Nallo Manon", false, [ D, L, J, I, E ]),
+        Student::new("Delval Epona", true,  [ F, C, L, E, J ]),
+        Student::new("Wagner Pierre", false, [ B, L, F, I, A ]),
     ]);*/
-    let classroom2 = Classroom::rand(&mut rng);
-    let classroom = classroom2;
+    /* Create a classroom */
+    let classroom2 = Classroom::new(vec![
+        Student::new("epona delval",  true, [ C, J, I, B, F ]),
+        Student::new("kassandra savagnac", false, [ J, F, D, L, A ]),
+        Student::new("soren chateigner",  false,  [ F, C, I, B, J ]),
+        Student::new("camille grellaud",  true, [ F, J, L, C, A ]),
+        Student::new("matteo tuzo", false, [ C, F, D, J, L ]),
+        Student::new("fybie ragnaud",  false,  [ C, D, J, I, A ]),
+        Student::new("jodie bethys",  false, [ C, J, D, I, B ]),
+        Student::new("antoine girard", false, [ I, D, F, J, B ]),
+        Student::new("gwendoline das dores",  false,  [ J, D, B, L, C ]),
+        Student::new("florian bremaud",  false, [ J, D, L, C, I ]),
+        Student::new("nina brunel", true, [ D, J, F, A, B ]),
+        Student::new("naomy henny",  true,  [ A, J, L, C, B ]),
+        Student::new("estelle masson",  false, [ J, L, C, F, B ]),
+        Student::new("malou hacques", true, [ J, C, F, B, I ]),
+        Student::new("manon di nalo",  false,  [ J, C, F, L, I ]),
+        Student::new("landric rusquet", false, [ J, L, A, B, C ]),
+        Student::new("pierre wagner",  false,  [ J, L, F, D, C ]),
+    ]);
+    let classroom3 = Classroom::new(vec![
+        Student::new("Logan",       false,  [ I,K,B,L,C ]),
+        Student::new("Juliette", false, [ E,L,K,I,C ]),
+        Student::new("Soren",   true, [ I,L,M,C,A ]),
+        Student::new("Maïly",   false,  [ L,I,K,E,J ]),
+        Student::new("Jodie",       true,  [ I,D,C,L,E ]),
+        Student::new("Louane", false, [ I,A,C,E,L ]),
+        Student::new("Malou",   true, [ I,K,J,G,F ]),
+        Student::new("Anaëlle",   false,  [ L,K,F,J,I ]),
+        Student::new("Camille",       true,  [ I,H,K,L,C ]),
+        Student::new("Antoine", true, [ I,H,L,K,E ]),
+        Student::new("Naomy",   true, [ I,K,L,C,E ]),
+        Student::new("Epona",   true,  [ I,C,D,M,E ]),
+        Student::new("Nina B",       true,  [ M,L,I,K,B ]),
+        Student::new("Ethan", false, [ L,I,F,C,K ]),
+        Student::new("Manon",   true, [ L,I,E,K,H ]),
+        Student::new("Elérose",   false,  [ H,M,G,F,D ]),
+        Student::new("Quentin",       false,  [ A,B,C,E,G ]),
+        Student::new("Dorian", false, [ M,L,G,A,K ]),
+        Student::new("Chloé",   false, [ C,I,L,E,J ]),
+        Student::new("Flavien",   false,  [ C,G,H,K,I ]),
+        Student::new("Nawel",       false,  [ E,I,H,C,L ]),
+        Student::new("Maxime", false, [ C,E,I,L,H ]),
+        Student::new("Jeanne",   false, [ I,C,L,H,B ]),
+        Student::new("Estelle",   true,  [ I,F,D,G,K ]),
+        Student::new("Rose",       false,  [ D,F,M,K,J ]),
+        Student::new("Matisse", false, [ C,A,K,G,D ]),
+        Student::new("Mattéo",   true, [ D,A,G,F,M ]),
+    ]);
+    // let classroom_rand = Classroom::rand(&mut rng);
+    let classroom = classroom3;
     println!("Our classroom is:\n{:?}", &classroom);
 
     /* Generate all set selections */
     let nsets_min = NSTUDENT / NSPS_MAX;
     let nsets_max = NSTUDENT / NSPS_MIN;
     let mut set_selections = SetSelection::generate(&classroom, nsets_min, nsets_max);
-    set_selections.truncate(200);
+    set_selections.truncate(1000);
 
     let mut depth = 1;
     let mut curr_set_selections: Vec<&SetSelection> = Vec::new();
